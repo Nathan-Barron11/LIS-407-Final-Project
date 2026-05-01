@@ -1,0 +1,541 @@
+---
+title: "Which Hitting Metrics Predict Success?"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme:
+      version: 4
+      bootswatch: darkly
+date: "2026-04-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r, include=FALSE}
+library(flexdashboard)
+library(plotly)
+library(dplyr)
+library(DT)
+library(RColorBrewer)
+```
+
+
+```{r, include=FALSE}
+stats = read.csv("stats (1).csv")
+stats = stats %>% rename(name = last_name..first_name, avg = batting_avg, slg = slg_percent, ops = on_base_plus_slg)
+stats = stats %>% rename (GB_percent = groundballs_percent, FB_percent = flyballs_percent, LD_percent = linedrives_percent, oppo_percent = opposite_percent, iso = isolated_power, swing_speed = avg_swing_speed, exit_velo = exit_velocity_avg, barrel_rate = barrel_batted_rate)
+stats = stats %>% 
+  mutate(
+    avg          = as.numeric(avg),
+    slg          = as.numeric(slg),
+    ops          = as.numeric(ops),
+    iso          = as.numeric(iso),
+    xba          = as.numeric(xba),
+    xslg         = as.numeric(xslg),
+    woba         = as.numeric(woba),
+    xwoba        = as.numeric(xwoba),
+    sprint_speed = as.numeric(sprint_speed),
+    swing_speed  = as.numeric(swing_speed),
+    # Luck gap: positive = outperforming expectations
+    luck_gap   = round(woba - xwoba, 3),
+    luck_label = case_when(
+      luck_gap >  0.020 ~ "Overperformer",
+      luck_gap < -0.020 ~ "Underperformer",
+      TRUE              ~ "On Track"
+    ),
+    # Swing speed bins
+    speed_bin = cut(
+      swing_speed,
+      breaks = c(-Inf, 68, 71, 74, 77, Inf),
+      labels = c("< 68", "68–71", "71–74", "74–77", "77+")
+    ),
+    # Dominant batted ball profile per player
+    bb_profile = case_when(
+      LD_percent >= FB_percent & LD_percent >= GB_percent ~ "Line Drive Heavy",
+      FB_percent >= LD_percent & FB_percent >= GB_percent ~ "Fly Ball Heavy",
+      TRUE                                                ~ "Ground Ball Heavy"
+    )
+  )
+```
+
+Row {data-height=100}
+-------------------------------------
+
+### League Average OPS {.value-box}
+```{r}
+valueBox(
+  value    = round(mean(stats$ops), 3),
+  caption  = "League Average OPS",
+  icon     = "fa-baseball",
+  color    = "#1a6b3a"
+)
+```
+
+### League Average wOBA {.value-box}
+```{r}
+valueBox(
+  value    = round(mean(stats$woba), 3),
+  caption  = "League Average wOBA",
+  icon     = "fa-baseball-bat-ball",
+  color    = "#1a6b3a"
+)
+```
+
+### League average Swing Speed {.value-box}
+```{r}
+valueBox(
+  value    = round(mean(stats$swing_speed), 1),
+  caption  = "League Average Swing Speed",
+  icon     = "fa-baseball",
+  color    = "#1a6b3a"
+)
+```
+
+### League average Whiff Rate {.value-box}
+```{r}
+valueBox(
+  value    = round(mean(stats$whiff_percent), 1),
+  caption  = "League Average Whiff Rate",
+  icon     = "fa-baseball-bat-ball",
+  color    = "#1a6b3a"
+)
+```
+Row {data-height=450}
+-------------------------------------
+
+### OPS and wOBA's nearly perfect relationship
+```{r}
+plot_ly(
+  data      = stats,
+  x         = ~woba,
+  y         = ~ops,
+  type      = "scatter",
+  mode      = "markers",
+  hovertext = ~paste0(
+    "<b>", name, "</b><br>",
+    "OPS: ",  ops,  "<br>",
+    "wOBA: ", woba
+  ),
+  hoverinfo = "text",
+  marker    = list(
+    color   = "steelblue",
+    size    = 8,
+    opacity = 0.7,
+    line    = list(width = 0.5, color = "black")
+  )
+) %>%
+  layout(
+    # title = list(text = "OPS vs wOBA", font  = list(color = "black", size = 16)),
+    paper_bgcolor = "rgba(0,0,0,0)",
+    plot_bgcolor = "rgba(0,0,0,0)",
+    font  = list(color = "#e0e0e0"),
+    xaxis = list(
+      title     = "wOBA",
+      gridcolor = "rgba(0,0,0,0)",
+      zeroline  = FALSE,
+      color     = "#e0e0e0",
+      showline  = TRUE,
+      linecolor = "#e0e0e0"
+    ),
+    yaxis = list(
+      title     = "OPS",
+      gridcolor = "rgba(0,0,0,0)",
+      zeroline  = FALSE,
+      color     = "#e0e0e0",
+      showline  = TRUE,
+      linecolor = "#e0e0e0"
+    ),
+    margin = list(t = 20)
+  )
+```
+
+### Swing Speed's effect on OPS (Colored by Whiff rate)
+```{r}
+bin_summary <- stats %>%
+  filter(!is.na(speed_bin), !is.na(ops)) %>%
+  group_by(speed_bin) %>%
+  summarise(
+    avg_ops   = round(mean(ops,             na.rm = TRUE), 3),
+    avg_slg   = round(mean(slg,             na.rm = TRUE), 3),
+    avg_avg   = round(mean(avg,             na.rm = TRUE), 3),
+    avg_woba  = round(mean(woba,            na.rm = TRUE), 3),
+    avg_k     = round(mean(k_percent,       na.rm = TRUE), 1),
+    avg_bb    = round(mean(bb_percent,      na.rm = TRUE), 1),
+    avg_oz    = round(mean(oz_swing_percent, na.rm = TRUE), 1),
+    avg_whiff = round(mean(whiff_percent,   na.rm = TRUE), 1), 
+    n_players = n(),
+    .groups   = "drop"
+  )
+
+fig <- plot_ly(
+  bin_summary,
+  x            = ~speed_bin,
+  y            = ~avg_ops,
+  type         = "bar",
+  texttemplate = "",
+  hovertext    = ~paste0(
+    "<b>Swing Speed: ", speed_bin, " mph</b><br>",
+    "Avg OPS: <b>",    avg_ops,      "</b><br>",
+    "Avg Whiff%: ",     avg_whiff,    "<br>",
+    # "Avg wOBA: ",      avg_woba,     "<br>",
+    # "Avg AVG: ",       avg_avg,      "<br>",
+    "Avg K%: ",        avg_k,        "<br>",
+    # "Avg BB%: ",       avg_bb,       "<br>",
+    "Avg SLG: ",       avg_slg,      "<br>",
+    # "Avg OZ Swing%: ", avg_oz,       "<br>",
+    "Players in bin: ", n_players
+  ),
+  hoverinfo = "text",
+  marker = list(
+    color = ~avg_whiff,
+    colorscale = list(
+      c(0,   "#1a4480"),
+      # c(0, "blue"),
+      c(0.5, "#5bba6f"),
+      c(1,   "#f5c518")
+      # c(1, "red")
+    ),
+    # color = c("#2c7bb6", "#74add1", "#abd9e9", "#fdae61", "#d7191c"),
+    showscale = TRUE,
+    colorbar  = list(
+      title     = "Avg Whiff%",
+      tickfont  = list(color = "#e0e0e0"),
+      titlefont = list(color = "#e0e0e0")
+    ),
+    line = list(width = 0.5, color = "#222")
+  )
+) %>%
+  layout(
+    paper_bgcolor = "rgba(0,0,0,0)",
+    plot_bgcolor  = "rgba(0,0,0,0)",
+    font  = list(color = "#e0e0e0"),
+    xaxis = list(
+      title     = "Avg Swing Speed (mph)",
+      gridcolor = "rgba(0,0,0,0)",
+      zeroline  = FALSE,
+      color     = "#e0e0e0",
+      showline  = TRUE,
+      linecolor = "#e0e0e0"
+    ),
+    yaxis = list(
+      title     = "Average OPS",
+      gridcolor = "rgba(0,0,0,0)",
+      zeroline  = FALSE,
+      range     = c(0.65, 0.87),
+      color     = "#e0e0e0",
+      showline  = TRUE,
+      linecolor = "#e0e0e0"
+    ),
+    margin = list(t = 20)
+  )
+
+fig
+```
+
+Row {data-height=450}
+-------------------------------------
+
+### OPS by the rates of different Batted Ball Types
+```{r}
+compute_loess <- function(x_col, y_col, df, span = 0.6) {
+  d <- df %>%
+    filter(!is.na(.data[[x_col]]), !is.na(.data[[y_col]])) %>%
+    arrange(.data[[x_col]])
+  fit    <- loess(as.formula(paste(y_col, "~", x_col)), data = d, span = span)
+  x_seq  <- seq(min(d[[x_col]]), max(d[[x_col]]), length.out = 100)
+  fit_se <- predict(fit, newdata = setNames(data.frame(x_seq), x_col), se = TRUE)
+  data.frame(
+    x    = x_seq,
+    y    = fit_se$fit,
+    y_lo = fit_se$fit - 1.96 * fit_se$se.fit,
+    y_hi = fit_se$fit + 1.96 * fit_se$se.fit
+  )
+}
+
+ld_smooth <- compute_loess("LD_percent", "ops", stats)
+fb_smooth <- compute_loess("FB_percent", "ops", stats)
+gb_smooth <- compute_loess("GB_percent", "ops", stats)
+
+col_ld <- "#f5c518"
+col_fb <- "#5b9bd5"
+col_gb <- "#cc4444"
+
+fig_bb <- plot_ly()
+
+# ── Line Drive line ────────────────────────────────────────────────────────
+fig_bb <- fig_bb %>%
+  add_trace(
+    x         = ld_smooth$x,
+    y         = ld_smooth$y,
+    type      = "scatter", mode = "lines",
+    line      = list(color = col_ld, width = 3),
+    name      = "Line Drive %",
+    visible   = TRUE,
+    hovertext = paste0("LD%: ", round(ld_smooth$x, 1),
+                       "<br>Smoothed OPS: ", round(ld_smooth$y, 3)),
+    hoverinfo = "text"
+  )
+
+# ── Fly Ball line ──────────────────────────────────────────────────────────
+fig_bb <- fig_bb %>%
+  add_trace(
+    x         = fb_smooth$x,
+    y         = fb_smooth$y,
+    type      = "scatter", mode = "lines",
+    line      = list(color = col_fb, width = 3),
+    name      = "Fly Ball %",
+    visible   = FALSE,
+    hovertext = paste0("FB%: ", round(fb_smooth$x, 1),
+                       "<br>Smoothed OPS: ", round(fb_smooth$y, 3)),
+    hoverinfo = "text"
+  )
+
+# ── Ground Ball line ───────────────────────────────────────────────────────
+fig_bb <- fig_bb %>%
+  add_trace(
+    x         = gb_smooth$x,
+    y         = gb_smooth$y,
+    type      = "scatter", mode = "lines",
+    line      = list(color = col_gb, width = 3),
+    name      = "Ground Ball %",
+    visible   = FALSE,
+    hovertext = paste0("GB%: ", round(gb_smooth$x, 1),
+                       "<br>Smoothed OPS: ", round(gb_smooth$y, 3)),
+    hoverinfo = "text"
+  )
+
+# Trace order: LD line, FB line, GB line
+# Indices:         1       2       3
+
+btns <- list(
+  list(
+    method = "update", label = "Line Drive %",
+    args   = list(list(visible = c(TRUE,  FALSE, FALSE)),
+                  list(xaxis   = list(title = "Line Drive %", gridcolor = "rgba(0,0,0,0)",
+                                      zeroline = FALSE, color = "#e0e0e0", 
+                                      showline = TRUE, linecolor = "#e0e0e0")))
+  ),
+  list(
+    method = "update", label = "Fly Ball %",
+    args   = list(list(visible = c(FALSE, TRUE,  FALSE)),
+                  list(xaxis   = list(title = "Fly Ball %", gridcolor = "rgba(0,0,0,0)",
+                                      zeroline = FALSE, color = "#e0e0e0",
+                                      showline = TRUE, linecolor = "#e0e0e0")))
+  ),
+  list(
+    method = "update", label = "Ground Ball %",
+    args   = list(list(visible = c(FALSE, FALSE, TRUE)),
+                  list(xaxis   = list(title = "Ground Ball %", gridcolor = "rgba(0,0,0,0)",
+                                      zeroline = FALSE, color = "#e0e0e0", 
+                                      showline = TRUE, linecolor = "#e0e0e0")))
+  ), 
+  list(
+    method = "update", label = "All batted ball types",
+    args   = list(list(visible = c(TRUE, TRUE, TRUE)),
+                  list(xaxis   = list(title = "Batted Ball Type %", gridcolor = "rgba(0,0,0,0)",
+                                      zeroline = FALSE, color = "#e0e0e0",
+                                      showline = TRUE, linecolor = "#e0e0e0")))
+  )
+)
+
+fig_bb %>%
+  layout(
+    paper_bgcolor = "rgba(0,0,0,0)",
+    plot_bgcolor  = "rgba(0,0,0,0)",
+    font     = list(color = "#e0e0e0"),
+    xaxis    = list(title = "Line Drive %", gridcolor = "rgba(0,0,0,0)",
+                    zeroline = FALSE, color = "#e0e0e0", 
+                    showline = TRUE, linecolor = "#e0e0e0"),
+    yaxis    = list(title = "OPS", gridcolor = "rgba(0,0,0,0)",
+                    zeroline = FALSE, color = "#e0e0e0", range = c(0.5, 1.2), # rangemode = tozero,
+                    showline = TRUE, linecolor = "#e0e0e0"),
+    legend   = list(font = list(size = 11)),
+    margin   = list(t = 70),
+    updatemenus = list(list(
+      type       = "buttons",
+      direction  = "right",
+      showactive = TRUE,
+      x          = 0, xanchor = "left",
+      y          = 1.15, yanchor = "top",
+      buttons    = btns,
+      bgcolor    = "#eeeeee",
+      font       = list(color = "black")
+    ))# ,
+    # annotations = list(list(
+    #   # text      = "Batted Ball Type:",
+    #   x = 0, xref = "paper", xanchor = "left",
+    #   y = 1.22, yref = "paper", yanchor = "top",
+    #   showarrow = FALSE,
+    #   font      = list(color = "black", size = 12)
+    # ))
+  )
+```
+
+
+### Average Exit Velocity vs OPS (bubble size = whiff rate) (filtered by max pull %)
+```{r}
+pull_thresholds <- seq(30, 55, by = 5)
+
+fig_bubble <- plot_ly()
+
+for (p in pull_thresholds) {
+  d <- stats %>%
+    filter(!is.na(exit_velo), !is.na(ops), !is.na(whiff_percent)) %>%
+    filter(pull_percent <= p)
+  
+  # Scatter trace
+  fig_bubble <- fig_bubble %>%
+    add_trace(
+      data       = d,
+      x          = ~exit_velo,
+      y          = ~ops,
+      size       = ~whiff_percent,
+      type       = "scatter",
+      mode       = "markers",
+      sizes      = c(5, 50),
+      visible    = (p == max(pull_thresholds)),
+      showlegend = FALSE,
+      marker     = list(
+        color = "steelblue",
+        opacity = 0.7,
+        line    = list(width = 0.5, color = "black")
+      ),
+      hovertext = ~paste0(
+        "<b>", name, "</b><br>",
+        "Exit Velocity: ", exit_velo,    " mph<br>",
+        "OPS: ",           ops,           "<br>",
+        "Whiff%: ",        whiff_percent, "%<br>",
+        "Pull%: ",         pull_percent,  "%<br>"
+        # "GB%: ",           GB_percent,    "%<br>",
+        # "AVG: ",           avg
+      ),
+      hoverinfo = "text"
+    )
+  
+  fit   <- lm(ops ~ exit_velo, data = d)
+  x_seq <- seq(min(d$exit_velo, na.rm = TRUE), max(d$exit_velo, na.rm = TRUE), length.out = 100)
+  y_seq <- predict(fit, newdata = data.frame(exit_velo = x_seq))
+
+  fig_bubble <- fig_bubble %>%
+    add_trace(
+      x         = x_seq,
+      y         = y_seq,
+      type      = "scatter",
+      mode      = "lines",
+      visible   = (p == max(pull_thresholds)),
+      showlegend= FALSE,
+      hoverinfo = "skip",
+      line      = list(color = "#ff6b6b", width = 2, dash = "dash")
+  )
+}
+
+n_pull   <- length(pull_thresholds)
+n_legend <- 3
+# Now 2 traces per threshold (scatter + trendline)
+
+steps <- lapply(seq_along(pull_thresholds), function(i) {
+  vis <- c(rep(FALSE, n_pull * 2), rep(TRUE, n_legend))
+  vis[(i - 1) * 2 + 1] <- TRUE   # scatter trace
+  vis[(i - 1) * 2 + 2] <- TRUE   # trendline trace
+  list(
+    method = "update",
+    label  = as.character(pull_thresholds[i]),
+    args   = list(list(visible = vis))
+  )
+})
+
+fig_bubble %>%
+  layout(
+    paper_bgcolor = "rgba(0,0,0,0)",
+    plot_bgcolor  = "rgba(0,0,0,0)",
+    font  = list(color = "#e0e0e0"),
+    xaxis = list(title = "Average Exit Velocity (mph)", showline = TRUE, linecolor="#e0e0e0",
+                 gridcolor = "#333", zeroline = FALSE, showgrid=FALSE),
+    yaxis = list(title = "OPS",  showline = TRUE, linecolor="#e0e0e0",
+                 gridcolor = "#333", zeroline = FALSE, showgrid = FALSE),
+    legend = list(
+      title = list(text = "<b>Whiff %</b>"),
+      font  = list(color = "#e0e0e0")
+    ),
+    margin = list(t = 30, b = 80),
+    sliders = list(list(
+      active       = length(pull_thresholds) - 1,
+      currentvalue = list(
+        prefix = "Max Pull%: ",
+        font   = list(color = "#e0e0e0", size = 13)
+      ),
+      steps       = steps,
+      x           = 0,
+      xanchor     = "left",
+      y           = -0.15,
+      yanchor     = "top",
+      bgcolor     = "#333",
+      bordercolor = "#888",
+      font        = list(color = "#e0e0e0")
+    ))
+  )
+```
+
+Row {data-height=450}
+-------------------------------------
+
+### Expected vs Actual wOBA
+```{r}
+stats_luck <- stats %>% filter(!is.na(xwoba), !is.na(woba))
+
+diag_min <- min(c(stats_luck$xwoba, stats_luck$woba), na.rm = TRUE) - 0.005
+diag_max <- max(c(stats_luck$xwoba, stats_luck$woba), na.rm = TRUE) + 0.005
+
+luck_colors <- c(
+  "Overperformer"  = "#f5c518",
+  "On Track"       = "#5b9bd5",
+  "Underperformer" = "#cc4444"
+)
+
+plot_ly() %>%
+  add_trace(
+    x         = c(diag_min, diag_max),
+    y         = c(diag_min, diag_max),
+    type      = "scatter",
+    mode      = "lines",
+    line      = list(color = "#666", width = 1.5, dash = "dot"),
+    name      = "Expected = Actual",
+    hoverinfo = "skip",
+    showlegend = TRUE
+  ) %>%
+  add_trace(
+    data      = stats_luck,
+    x         = ~xwoba,
+    y         = ~woba,
+    type      = "scatter",
+    mode      = "markers",
+    color     = ~luck_label,
+    colors    = luck_colors,
+    marker    = list(size = 9, opacity = 0.83,
+                     line = list(width = 0.5, color = "#222")),
+    text = ~paste0(
+      "<b>", name, "</b><br>",
+      "xwOBA: ", xwoba, "<br>",
+      "wOBA:  ", woba,  "<br>",
+      "Gap (actual − expected): ", luck_gap, "<br>",
+      "Status: <b>", luck_label, "</b>"
+    ),
+    hoverinfo = "text"
+  ) %>%
+  layout(
+    paper_bgcolor = "rgba(0,0,0,0)",
+    plot_bgcolor  = "rgba(0,0,0,0)",
+    font  = list(color = "#e0e0e0"),
+    xaxis = list(title = "Expected wOBA (xwOBA)", gridcolor = "#333", zeroline = FALSE),
+    yaxis = list(title = "Actual wOBA",           gridcolor = "#333", zeroline = FALSE),
+    legend = list(
+      title = list(text = "<b>vs. Expectation</b>"),
+      font  = list(size = 11)
+    ),
+    margin = list(t = 20)
+  )
+```
+
